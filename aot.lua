@@ -748,31 +748,6 @@ local function findODM()
 	return odmRef
 end
 
-local baseHookRange = nil
-local lastHookAt = 0
-local function runHookRange()
-	if not flagBool("misc_hook_enabled", false) then return end
-	if os.clock() - lastHookAt < 0.5 then return end
-	lastHookAt = os.clock()
-	local odm = findODM()
-	if not odm then return end
-	local desired = flagNum("misc_hook_range", 120)
-	pcall(function()
-		if typeof(odm.config) == "table" then
-			if baseHookRange == nil and typeof(odm.config.hook_range) == "number" then
-				baseHookRange = odm.config.hook_range
-			end
-			odm.config.hook_range = desired
-		end
-		if typeof(odm.CONSTANTS) == "table" and typeof(odm.CONSTANTS.HookRange) == "number" then
-			odm.CONSTANTS.HookRange = desired
-		end
-		if typeof(rawget(odm, "HookRange")) == "number" then
-			odm.HookRange = desired
-		end
-	end)
-end
-
 local lastRefillAt = 0
 local function runAutoBladeRefill()
 	if not flagBool("misc_auto_blade_refill", false) then return end
@@ -990,8 +965,6 @@ MiscLeft:Slider({ Name = "Attempt Rate", Flag = "misc_breakfree_rate", Min = 0.0
 MiscLeft:Toggle({ Name = "Infinite Gas", Flag = "misc_inf_gas", Default = false, Tooltip = "ODM gas stay full (light updates)" })
 MiscLeft:Toggle({ Name = "Infinite Blades", Flag = "misc_inf_blades", Default = false, Tooltip = "Keep blade cartridges full" })
 MiscLeft:Toggle({ Name = "Infinite Durability", Flag = "misc_inf_durability", Default = false, Tooltip = "Keep blade durability full" })
-MiscLeft:Toggle({ Name = "Hook Range", Flag = "misc_hook_enabled", Default = false, Tooltip = "Client ODM hook range" })
-MiscLeft:Slider({ Name = "Hook Studs", Flag = "misc_hook_range", Min = 40, Max = 600, Default = 200, Decimals = 0 })
 MiscLeft:Toggle({ Name = "Auto Blade Refill", Flag = "misc_auto_blade_refill", Default = false, Tooltip = "Refill blades near supply stations" })
 MiscLeft:Slider({ Name = "Refill Range", Flag = "misc_auto_blade_range", Min = 5, Max = 40, Default = 20, Decimals = 0 })
 pcall(function()
@@ -1113,7 +1086,6 @@ local conn = RunService.RenderStepped:Connect(function()
 	pcall(runBreakFree)
 	pcall(runInfiniteGas)
 	pcall(runInfiniteBlades)
-	pcall(runHookRange)
 	pcall(runAutoBladeRefill)
 	pcall(runTriggers)
 	if os.clock() - lastEspAt >= 0.15 then

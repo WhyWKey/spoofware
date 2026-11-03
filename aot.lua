@@ -49,16 +49,45 @@ end
 local function keybindActive(flagName)
 	local v = Flags[flagName]
 	if v == nil then return true end
-	if typeof(v) == "table" then
-		local key = v.Key
-		local mode = v.Mode or "Hold"
-		if key == nil or key == "" or key == "None" or tostring(key):find("Unknown") then
-			return true
-		end
-		if mode == "Always" then return true end
-		return v.Toggled == true
+	if typeof(v) ~= "table" then return true end
+
+	local key = v.Key
+	local mode = tostring(v.Mode or "Hold")
+	if key == nil or key == "" or key == "None" or tostring(key):find("Unknown") then
+		return true
 	end
-	return true
+	if mode == "Always" then return true end
+	if mode == "Toggle" then
+		return v.Toggled == true or v.Value == true or v.Active == true
+	end
+
+	if v.Toggled == true or v.Active == true or v.Held == true then
+		return true
+	end
+
+	local kc = key
+	if typeof(key) == "string" then
+		local ok, enumKey = pcall(function()
+			return Enum.KeyCode[key]
+		end)
+		if ok and enumKey then
+			kc = enumKey
+		else
+			ok, enumKey = pcall(function()
+				return Enum.UserInputType[key]
+			end)
+			if ok and enumKey then kc = enumKey end
+		end
+	end
+	if typeof(kc) == "EnumItem" then
+		if kc.EnumType == Enum.KeyCode then
+			return UserInputService:IsKeyDown(kc)
+		end
+		if kc.EnumType == Enum.UserInputType then
+			return UserInputService:IsMouseButtonPressed(kc)
+		end
+	end
+	return false
 end
 
 local function aimActive(prefix)
@@ -215,16 +244,29 @@ end
 
 local function multiHas(tbl, name)
 	if typeof(tbl) ~= "table" then return true end
-	if tbl[name] == true then return true end
-	for _, v in pairs(tbl) do
-		if v == name or tostring(v) == name then return true end
+	local function hit(label)
+		if tbl[label] == true then return true end
+		for _, v in pairs(tbl) do
+			if v == label or tostring(v) == label then return true end
+		end
+		return false
 	end
-	if name ~= "Head" and multiHas(tbl, "Body") then return true end
+	if hit(name) then return true end
+	if name == "UpperTorso" or name == "LowerTorso" or name == "Torso" then
+		return hit("Torso") or hit("Body")
+	end
+	if name == "HumanoidRootPart" or name == "Chest" or name == "UpperChest" then
+		return hit("Body") or hit("Torso")
+	end
+	if name ~= "Head" and hit("Body") then return true end
 	return false
 end
 
 local function pickPlayerPart(model, priority, allowed, center)
-	local names = { "Head", "Torso", "UpperTorso", "HumanoidRootPart" }
+	local names = {
+		"Head", "Torso", "UpperTorso", "LowerTorso",
+		"HumanoidRootPart", "Chest", "UpperChest",
+	}
 	local parts = {}
 	for _, n in ipairs(names) do
 		local p = model:FindFirstChild(n, true)
@@ -234,10 +276,14 @@ local function pickPlayerPart(model, priority, allowed, center)
 	end
 	if #parts == 0 then return findRoot(model) end
 	if priority == "Head" then
-		for _, p in ipairs(parts) do if p.Name == "Head" then return p end end
-	elseif priority == "Torso" then
 		for _, p in ipairs(parts) do
-			if p.Name == "Torso" or p.Name == "UpperTorso" then return p end
+			if p.Name == "Head" then return p end
+		end
+	elseif priority == "Torso" or priority == "Body" then
+		for _, p in ipairs(parts) do
+			if p.Name == "Torso" or p.Name == "UpperTorso" or p.Name == "HumanoidRootPart" then
+				return p
+			end
 		end
 	end
 	local best, bestD
@@ -316,6 +362,22 @@ end
 
 local aimState = { pve = nil, pvp = nil }
 
+local function moveAimTo(screenPos, step)
+	local mouse = mousePos()
+	local delta = (screenPos - mouse) * step
+	if math.abs(delta.X) < 0.15 and math.abs(delta.Y) < 0.15 then
+		return
+	end
+	if typeof(mousemoverel) == "function" then
+		mousemoverel(delta.X, delta.Y)
+		return
+	end
+	local vim = game:GetService("VirtualInputManager")
+	pcall(function()
+		vim:SendMouseMoveEvent(mouse.X + delta.X, mouse.Y + delta.Y, game)
+	end)
+end
+
 local function runAimbot(prefix)
 	if not aimActive(prefix) then
 		aimState[prefix] = nil
@@ -327,21 +389,28 @@ local function runAimbot(prefix)
 		if prefix == "pve" then
 			current.Part = resolveNape(current.Target.Model) or current.Part
 		else
-			current.Part = pickPlayerPart(current.Target.Model, tostring(flag(prefix .. "_aim_priority", "Closest")), flag(prefix .. "_aim_points", { Head = true }), mousePos()) or current.Part
+			current.Part = pickPlayerPart(
+				current.Target.Model,
+				tostring(flag(prefix .. "_aim_priority", "Closest")),
+				flag(prefix .. "_aim_points", { Head = true, Torso = true }),
+				mousePos()
+			) or current.Part
 		end
 	else
 		current = findBestTarget(prefix)
 		aimState[prefix] = current
 	end
 	if not current or not current.Part then return end
-	local mouse = mousePos()
-	local sp, on = worldToScreen(current.Part.Position)
+
+	local sp, onScreen = worldToScreen(current.Part.Position)
 	local step = math.clamp((110 - flagNum(prefix .. "_aim_smooth", 40)) / 100, 0.05, 1)
-	if on and typeof(mousemoverel) == "function" then
-		local delta = (sp - mouse) * step
-		mousemoverel(delta.X, delta.Y)
+	if onScreen then
+		moveAimTo(sp, step)
 	else
-		Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, current.Part.Position), step)
+		Camera.CFrame = Camera.CFrame:Lerp(
+			CFrame.new(Camera.CFrame.Position, current.Part.Position),
+			step * 0.65
+		)
 	end
 end
 
